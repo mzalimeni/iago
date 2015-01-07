@@ -74,7 +74,6 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
 
       BackgroundProcess {
         runLoad()
-        reportResults()
         shutdown()
       }
     }
@@ -215,13 +214,6 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
 
     requestsRead.addAndGet(result.size)
     result.toList
-  }
-
-  // TEST: How do we handle the case where we feed a parrot for a while and then it dies,
-  // TEST: but we continue the run with the rest of the cluster?
-  private[this] def reportResults() {
-    val results = getResults(cluster.parrots)
-    log.info("Lines played: %d failed: %d", results.success, results.failure)
   }
 
   // TEST: confirm that a set of parrots add up to the expected total
