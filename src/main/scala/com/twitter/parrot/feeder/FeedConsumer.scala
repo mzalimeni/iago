@@ -46,7 +46,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
         } else send
       }
     }
-    while (!queue.isEmpty() && state != FeederState.TIMEOUT)
+    while (!queue.isEmpty && state != FeederState.SHUTDOWN)
       if (parrot.isBusy)
         Thread.sleep(ParrotPoller.pollRate)
       else
@@ -54,7 +54,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
     done.setValue(())
   }
 
-  private def send {
+  private def send() {
     try {
       sendRequest(parrot, queue.take())
     } catch {
@@ -62,7 +62,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
     }
   }
 
-  def shutdown {
+  def shutdown() {
     Await.ready(done)
   }
 
@@ -80,6 +80,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
 
   private[this] def sendRequest(parrot: RemoteParrot, request: List[String]) {
     val success = parrot.sendRequest(request)
+    val linesProcessed = success.linesProcessed getOrElse 0
     log.info("FeedConsumer.sendRequest: wrote batch of size %d to %s:%d rps=%g depth=%g status=%s lines=%d",
       request.size,
       parrot.host,
@@ -87,9 +88,9 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
       success.requestsPerSecond getOrElse 0d,
       success.queueDepth getOrElse 0d,
       success.status,
-      success.linesProcessed getOrElse 0)
+      linesProcessed)
 
-    val linesProcessed = success.linesProcessed getOrElse 0
+    log.debug("Lines processed for %s: %d  Request length: %d  Fails: %d", parrot.toString, linesProcessed, request.length, request.length - linesProcessed)
     parrot.results.add(new InternalCounter(linesProcessed, request.length - linesProcessed))
     parrot.queueDepth = success.queueDepth getOrElse 0d
   }

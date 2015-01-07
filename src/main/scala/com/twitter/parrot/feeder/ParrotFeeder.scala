@@ -34,7 +34,7 @@ import com.twitter.parrot.util.RemoteParrot
 import com.twitter.util.Duration
 
 object FeederState extends Enumeration {
-  val EOF, TIMEOUT, RUNNING = Value
+  val RUNNING, FINISHED, SHUTDOWN = Value
 }
 
 case class Results(success: Int, failure: Int)
@@ -86,8 +86,8 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
    */
   def shutdown() {
     log.trace("ParrotFeeder: shutting down ...")
-    if (state == FeederState.RUNNING)
-      state = FeederState.TIMEOUT // shuts down immediately when timeout
+    if (state != FeederState.SHUTDOWN)
+      state = FeederState.SHUTDOWN // stop all feeding immediately
     cluster.shutdown()
     poller.shutdown()
     ServiceTracker.shutdown()
@@ -166,14 +166,14 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
         if (config.maxRequests - requestsRead.get <= 0) {
           log.info("ParrotFeeder.runLoad: exiting because config.maxRequests = %d and requestsRead.get = %d",
             config.maxRequests, requestsRead.get)
-          state = FeederState.EOF
+          state = FeederState.FINISHED
         } else if (!lines.hasNext) {
           if (config.reuseFile) {
             log.info("ParrotFeeder.runLoad: inputLog is exhausted, restarting reader.")
             lines.reset()
           } else {
             log.info("ParrotFeeder.runLoad: exiting because log exhausted")
-            state = FeederState.EOF
+            state = FeederState.FINISHED
           }
         }
       }
@@ -240,9 +240,11 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
     timer.schedule(new TimerTask {
       def run() {
         timer.cancel()
-        log.info("ParrotFeeder.shutdownAfter: shutting down due to duration timeout of %s",
-          PrettyDuration(duration))
-        state = FeederState.TIMEOUT
+        if (state == FeederState.RUNNING) {
+          log.info("ParrotFeeder.shutdownAfter: shutting down due to duration timeout of %s",
+            PrettyDuration(duration))
+          state = FeederState.SHUTDOWN
+        }
       }
     },
       duration.inMillis)
