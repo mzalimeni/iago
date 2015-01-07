@@ -104,7 +104,7 @@ class RemoteParrot(val name: String,
   }
 
   def getStatus: ParrotStatus = {
-    waitFor(client.getStatus)
+    waitFor(client.getStatus())
   }
 
   def pause() {
@@ -121,9 +121,9 @@ class RemoteParrot(val name: String,
     service.close()
   }
 
-  def isConnected() = {
-    service.isAvailable
-  }
+  def isConnected = service.isAvailable
+
+  def isBusy = queueDepth > targetDepth
 
   override def equals(that: Any): Boolean = {
     that match {
@@ -133,8 +133,6 @@ class RemoteParrot(val name: String,
   }
 
   override lazy val hashCode = host.hashCode + port.hashCode
-
-  def isBusy = queueDepth > targetDepth
 
   private[this] def connect(host: String, port: Int) = {
     val statsReceiver = new OstrichStatsReceiver
