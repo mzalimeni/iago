@@ -15,7 +15,6 @@ limitations under the License.
 */
 package com.twitter.parrot.config
 
-import java.net.InetAddress
 import java.net.InetSocketAddress
 
 import scala.collection.JavaConverters.asJavaIterableConverter

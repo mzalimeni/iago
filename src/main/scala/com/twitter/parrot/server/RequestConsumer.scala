@@ -35,6 +35,7 @@ class RequestConsumer[Req <: ParrotRequest, Rep](
   private[this] val log = Logger.get(getClass)
   private[this] val queue = new LinkedBlockingQueue[Req]()
   private[this] var rate: Int = 1
+  private[this] val cancelled = new AtomicBoolean(false)
   private[this] val done = Promise[Unit]
 
   val started = Promise[Unit]
@@ -47,7 +48,8 @@ class RequestConsumer[Req <: ParrotRequest, Rep](
   var totalProcessed = 0
 
   def offer(request: Req) {
-    queue.offer(request)
+    if (!cancelled.get) // Don't accept new requests if draining to shut down
+      queue.offer(request)
   }
 
   override def start() {
@@ -120,6 +122,12 @@ class RequestConsumer[Req <: ParrotRequest, Rep](
     resume
   }
 
+  def cancel() {
+    cancelled.set(true) // First, stop accepting new requests
+    queue.clear()
+    log.trace("RequestConsumer: queued requests cancelled, future requests will be ignored")
+  }
+
   def size = {
     queue.size
   }
@@ -133,9 +141,11 @@ class RequestConsumer[Req <: ParrotRequest, Rep](
     process.set(distributionFactory(rate))
   }
 
-  def shutdown: Unit = {
+  def shutdown(): Unit = {
     val elapsed = Stopwatch.start()
-    interrupt
+    cancelled.set(true)
+    log.trace("RequestConsumer: draining %d requests from queue", queue.size())
+    interrupt()
     Await.ready(done)
     log.trace("RequestConsumer shut down in %s", PrettyDuration(elapsed()))
   }

@@ -23,4 +23,5 @@ class LocalCluster extends ParrotCluster {
   def pause() = ()
   def resume() = ()
   def shutdown() = ()
+  def cancelRequests() = ()
 }

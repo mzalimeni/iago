@@ -115,6 +115,12 @@ class ParrotServerImpl[Req <: ParrotRequest, Rep](val config: ParrotServerConfig
     result
   }
 
+  def cancelRequests(): Future[Unit] = {
+    log.debug("cancelRequests: cancelling queued requests")
+    queue.cancel()
+    Future.Unit
+  }
+
   def getStatus: Future[ParrotStatus] = Future {
     val collection = Stats.get("global")
 

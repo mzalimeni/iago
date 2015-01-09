@@ -115,9 +115,13 @@ class RemoteParrot(val name: String,
     waitFor(client.resume())
   }
 
+  def cancelRequests() {
+    waitFor(client.cancelRequests())
+  }
+
   def shutdown() {
-    consumer.shutdown
-    waitFor(client.shutdown(), Duration.Top)
+    consumer.shutdown()
+    waitFor(client.shutdown(), Duration.Top) // If client queue is full, this could take a while
     service.close()
   }
 

@@ -54,7 +54,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
     done.setValue(())
   }
 
-  private def send {
+  private def send() {
     try {
       sendRequest(parrot, queue.take())
     } catch {
@@ -62,7 +62,7 @@ class FeedConsumer(parrot: RemoteParrot, state: => FeederState.Value) extends Th
     }
   }
 
-  def shutdown {
+  def shutdown() {
     Await.ready(done)
   }
 

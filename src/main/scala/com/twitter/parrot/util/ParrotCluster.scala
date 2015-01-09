@@ -113,6 +113,7 @@ trait ParrotCluster {
   def pause()
   def resume()
   def shutdown()
+  def cancelRequests()
 }
 
 /**
@@ -328,6 +329,20 @@ class ParrotClusterImpl(config: Option[ParrotCommonConfig] = None)
     }
     _runningParrots.clear()
     _pausedParrots.clear()
+  }
+
+  def cancelRequests() {
+    log.logLazy(Level.DEBUG, "ParrotClusterImpl: cancelling queued parrot requests")
+
+    val allParrots = parrots
+    allParrots foreach { parrot =>
+      try {
+        parrot.cancelRequests()
+        log.info("requests successfully cancelled on parrot server %s".format(parrot.name))
+      } catch {
+        case t: Throwable => log.error(t, "Error cancelling requests for Parrot: %s", t.getClass.getName)
+      }
+    }
   }
 
   def pause() {

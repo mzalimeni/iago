@@ -30,6 +30,7 @@ service ParrotServerService {
     ParrotStatus getStatus(),
     void start(),
     oneway void shutdown(),
+    oneway void cancelRequests(),
     void pause(),
     void resume(),
     string fetchThreadStacks(),

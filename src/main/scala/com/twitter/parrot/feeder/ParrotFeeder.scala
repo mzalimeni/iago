@@ -19,7 +19,7 @@ import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import scala.collection.mutable
 
@@ -44,6 +44,7 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
   val requestsRead = new AtomicLong(0)
   @volatile
   protected[this] var state = FeederState.RUNNING
+  private[this] val isShutdown = new AtomicBoolean(false)
 
   private[this] val initializedParrots = mutable.Set[RemoteParrot]()
 
@@ -84,13 +85,21 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
    * called remotely if the web management interface is enabled.
    */
   def shutdown() {
-    log.trace("ParrotFeeder: shutting down ...")
-    if (state == FeederState.RUNNING)
-      state = FeederState.TIMEOUT // shuts down immediately when timeout
-    cluster.shutdown()
-    poller.shutdown()
-    ServiceTracker.shutdown()
-    log.trace("ParrotFeeder: shut down")
+
+    /* Calling ServiceTracker.shutdown() causes all the Ostrich threads to go away. It also results
+     * in all its managed services to be shutdown. That includes this service. We put a guard
+     * here so we don't end up calling ourselves twice.
+     */
+
+    if (isShutdown.compareAndSet(false, true)) {
+      log.trace("ParrotFeeder: shutting down ...")
+      if (state == FeederState.RUNNING)
+        state = FeederState.TIMEOUT // if shutdown was invoked outside of normal lifecycle, stop feeder consumer now
+      cluster.shutdown()
+      poller.shutdown()
+      ServiceTracker.shutdown()
+      log.trace("ParrotFeeder: shut down")
+    }
   }
 
   private[this] def validatePreconditions(): Boolean = {
@@ -241,6 +250,12 @@ class ParrotFeeder(config: ParrotFeederConfig) extends Service {
         timer.cancel()
         log.info("ParrotFeeder.shutdownAfter: shutting down due to duration timeout of %s",
           PrettyDuration(duration))
+
+        // Immediately empty parrot request queues. This must be done here because a "slow" shutdown that allows
+        // parrot queues to finish (i.e. maxRequests reached) could already be in progress in the main feeder thread
+        cluster.cancelRequests()
+
+        // Trigger shutdown if not already in progress
         state = FeederState.TIMEOUT
       }
     },
