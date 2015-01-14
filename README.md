@@ -140,13 +140,18 @@ The Iago servers generate requests to your service. Together, all Iago servers g
 
 The feeder polls its servers to see how much data they need to maintain _cachedSeconds_ worth of data. That is how we can have many feeders that need not coordinate with each other.
 
-Ensuring that we go through every last message is important when we are writing traffic summaries in the record processor, especially when the data set is small. The parrot feeder shuts down due to running out of time, running out of data, or both. When the feeder runs out of data we
+Ensuring that we go through every last message is important when we are writing traffic summaries in the record processor, especially when the data set is small. The parrot feeder shuts down due to running out of time, running out of data, or both. In all cases, when the feeder shuts down, we wait until we get a response for all pending messages.
 
-- make sure that all the data in parrot feeder's internal queues are sent to the parrot server
-- make sure all the data held in the parrot servers cache is sent
-- wait until we get a response for all pending messages or until the reads time out
+When the parrot feeder runs out of data, we
 
-When the parrot feeder runs out of time (the duration configuration) the data in the feeder's internal queues are ignored, otherwise the same process as above occurs.
+- make sure that all the requests in parrot feeder's internal queues are sent to the parrot server
+- make sure all the requests held in the parrot servers cache is sent
+
+When the parrot feeder runs out of time (the duration configuration), we
+
+- ignore the remaining requests in the parrot feeder's internal queue
+- tell the parrot servers to ignore further incoming requests (to avoid a race condition)
+- clear the remaining requests held in the parrot servers cache
 
 
 [Top](#Top)
@@ -429,7 +434,7 @@ You can specify any of the following parameters:
     <td><code>duration</code></td>
     <td><p>An integer value that specifies the time to run the test in <code>timeUnit</code> units.</p>
     <p><b>Example: </b><code>duration = 5</code></p></td>
-    <td><code>&nbsp;</code></td>
+    <td><code>0 (no limit)</code></td>
 </tr>
 
 <tr>
@@ -503,7 +508,6 @@ You can specify any of the following parameters:
     <td><p>A string value that specifies the complete path to the log you want Iago to replay. If localMode=true then the log should be on your local file system. The log should have at least 1000 items or you should change the <code>reuseFile</code> parameter.</p>
     <p><b>Example: </b><code>log = "logs/yesterday.log"</code></p>
     <p><p>If localMode=false (the default), then the parrot launcher will copy your log file when attempts to make a package for mesos. You can avoid this, and should, by storing your log file in HDFS.<p><b>Example: </b><code>log = "hdfs://hadoop-example.com/yesterday.log"</code></p></td>
-    <td><b>Required</b></td>
     <td><b>Required</b></td>
 </tr>
 
