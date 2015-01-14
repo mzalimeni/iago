@@ -86,7 +86,7 @@ class ParrotServerImpl[Req <: ParrotRequest, Rep](val config: ParrotServerConfig
         ServiceTracker.shutdown()
         thriftServer.shutdown()
         log.trace("shut down")
-        done.setValue(null)
+        done.setValue(())
       }
     }
     done
