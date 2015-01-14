@@ -15,6 +15,7 @@ limitations under the License.
 */
 package com.twitter.parrot.integration
 
+import com.twitter.parrot.thrift.ParrotStatus
 import org.jboss.netty.handler.codec.http.HttpResponse
 import org.junit.runner.RunWith
 import org.scalatest.WordSpec
@@ -23,13 +24,10 @@ import org.scalatest.matchers.MustMatchers
 
 import com.twitter.conversions.time.intToTimeableNumber
 import com.twitter.io.TempFile
-import com.twitter.logging.Level
 import com.twitter.logging.Logger
-import com.twitter.parrot.config.ParrotFeederConfig
 import com.twitter.parrot.config.ParrotServerConfig
-import com.twitter.parrot.feeder.{FeederState, InMemoryLog, ParrotFeeder}
+import com.twitter.parrot.feeder.{FeederState, ParrotFeeder}
 import com.twitter.parrot.server._
-import com.twitter.parrot.util.ConsoleHandler
 import com.twitter.parrot.util.PrettyDuration
 import com.twitter.util._
 
@@ -107,8 +105,17 @@ class EndToEndSpec extends WordSpec with MustMatchers with FeederFixture {
         val serverConfig = makeServerConfig(true)
         serverConfig.cachedSeconds = 1
         val transport = serverConfig.transport.get.asInstanceOf[FinagleTransport]
+
+        var queueDepthBeforeCancel = 0.0
+        val cancelWasCalled = Promise[Unit]
         val server: ParrotServerImpl[ParrotRequest, HttpResponse] =
-          new ParrotServerImpl(serverConfig)
+          new ParrotServerImpl(serverConfig) {
+            override def cancelRequests(): Future[Unit] = {
+              cancelWasCalled.setDone()
+              queueDepthBeforeCancel = getStatus()().queueDepth getOrElse 0.0
+              super.cancelRequests()
+            }
+          }
         server.start()
 
         val rate = 1 // rps ... requests per second
@@ -134,11 +141,14 @@ class EndToEndSpec extends WordSpec with MustMatchers with FeederFixture {
         feeder.start()
         try {
           Await.ready(feederDone, (secondsToRun + 1).seconds) // time out if feeder timeout is not honored
+          Await.ready(cancelWasCalled, 1.seconds) // time out if cancel is not called
         } catch {
           case e: TimeoutException =>
             fail(String.format("Server did not time out in %s", PrettyDuration(secondsToRun.seconds)))
         }
         feederState must be === FeederState.TIMEOUT
+        queueDepthBeforeCancel must not be 0 // verify that there were requests to cancel
+        server.getStatus()().queueDepth must be(Some(0))
       }
 
       "honor the max request limit" in {
