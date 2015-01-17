@@ -1,0 +1,329 @@
+#!/bin/bash
+
+# Copyright 2014 Twitter, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run Iago from the command line with options
+# Author: michael.zalimeni@bronto.com
+
+# Set initial variable values
+iagoVersion=$(grep -m 1 "<version>" "./pom.xml" | sed -e "s/^.*>\([0-9\.]*\)<.*$/\1/")
+distributionZipFile="iago-$iagoVersion-package-dist.zip"
+distributionJarFile="iago-$iagoVersion.jar"
+configFile=$(find ./config -type f -name "launcher.scala") # Default to launcher.scala
+unset configOptions
+unset valJustSet
+unset superQuietLogging
+unset quietLogging
+unset configName
+unset javaError
+unset noBrowser
+unset feederPid
+unset serverPid
+unset rebuild
+unset testStarted
+
+# Color aliases
+redb=$(tput bold;tput setaf 1)
+greenb=$(tput bold;tput setaf 2)
+yellowb=$(tput bold;tput setaf 3)
+normal=$(tput sgr0)
+
+# Log functions
+function progressLog() {
+  if [ -z "$superQuietLogging" ] || [ "$2" == "!" ]; then
+    echo -e "${greenb}$1${normal}"
+  fi
+}
+function infoLog() {
+  # NOTE: Thanks to operator precedence, || comes after the &&
+  if [ -z "$quietLogging" ] && [ -z "$superQuietLogging" ] || [ "$2" == "!" ]; then
+    echo -e "${yellowb}$1${normal}"
+  fi
+}
+function errorLog() {
+  echo -e "${redb}$1${normal}"
+}
+
+# Launch stats in browser
+function launchStats() {
+  _currentDir=$(basename "$PWD")
+  if [ "$_currentDir" == "tmp" ]; then
+    cd .. # Assumes we already started the test and are in ./tmp
+  fi
+  source "./stats" 2>/dev/null
+}
+
+# Graceful shutdown for interrupts
+function shutdownEarly() {
+  echo ""
+  infoLog "Received shutdown command" !
+  if [ -n "$feederPid" ] || [ -n "$serverPid" ]; then
+    infoLog "Killing test processes..." !
+    kill -9 ${feederPid} 2>/dev/null;
+    infoLog "Killed feeder"
+    kill -9 ${serverPid} 2>/dev/null;
+    infoLog "Killed server"
+  fi
+  if [ -n "$testStarted" ] && [ -z "$noBrowser" ]; then
+    read -e -p "Show stats from run? (y/n) " -n 1 _answer
+    if [ "$_answer" == "y" ] || [ "$_answer" == "Y" ]; then
+      launchStats
+    fi
+  fi
+  infoLog "Shut down" !
+  exit $?
+}
+
+function showHelp() {
+  underline=`tput smul`
+  nounderline=`tput rmul`
+  echo " "
+  echo " DESCRIPTION"
+  echo " "
+  echo -e "     This script will run a Iago load test using the config file denoted by ${underline}name${nounderline}, the full config file"
+  echo -e "     path denoted by the ${underline}-c${nounderline} option, or using the default 'config/launcher.scala' file. Options can be provided to"
+  echo "     override common configuration settings present in the target config file, creating a temporary copy with"
+  echo "     substituted values to be used in its place."
+  echo " "
+  echo -e "     For the given config file ${underline}name${nounderline} 'NAME', this script will execute a test using a config file"
+  echo "     'NAME.scala' present in the deployed copy of the 'config' directory (or one of its child directories)."
+  echo " "
+  echo "     A './tmp' directory will be created to run the test and produce process logs and stats. If './tmp' already"
+  echo "     exists, it will be removed. A currently running test for the same configuration, if it exists, will be killed."
+  echo " "
+  echo "     After the test processes have exited successfully, a browser will be opened to display the test stats in "
+  echo "     Raggiana (http://github.com/twitter/raggiana)."
+  echo " "
+  echo " OPTIONS:"
+  echo "     -v, --victims, --hosts   Provide victim(s) for test"
+  echo "     -l, --log                Provide requests log file for test"
+  echo "     -d, --duration           Duration timeout for test"
+  echo "     -m, --max-requests       Maximum number of requests to be sent"
+  echo "     -x, --request-rate       Rate per second at which to send requests"
+  echo "     -r, --reuse-file         Reuse requests log file once exhausted"
+  echo "     -f, --config             Provide full config file path for test execution"
+  echo "     -q                       Log quietly"
+  echo " "
+  echo " EXTENDED OPTIONS:"
+  echo "     --rebuild                Run 'mvn clean package -DskipTests' before executing test"
+  echo "     --no-browser             Do not automatically launch the local stats webpage when the test finishes"
+  echo "     --q                      Log very quietly"
+  echo " "
+  echo " "
+}
+
+# Command line arguments
+for arg in $@; do
+case ${arg} in
+  -v|--victims|--hosts)
+    valJustSet="true"
+    # Let the user provide the victims for the test
+    victims="$2"
+    configOptions="true"
+    ;;
+  -l|--log)
+    valJustSet="true"
+    # Let the user provide the requests file location
+    logFile="$2"
+    configOptions="true"
+    ;;
+  -f|--config)
+    valJustSet="true"
+    # Let the user provide the run config directly
+    configFile="$2"
+    ;;
+  -d|--duration)
+    valJustSet="true"
+    # Set duration timeout for test
+    duration=${2}
+    configOptions="true"
+    ;;
+  -m|--max-requests)
+    valJustSet="true"
+    # Set max requests for the test
+    maxRequests=${2}
+    configOptions="true"
+    ;;
+  -x|--request-rate)
+    valJustSet="true"
+    # Set request rate for the test
+    requestRate=${2}
+    configOptions="true"
+    ;;
+  -r|--reuse-file)
+    # Reuse the requests file
+    reuseRequestsFile="true"
+    configOptions="true"
+    ;;
+  -q)
+    # Log quietly
+    quietLogging="true"
+    ;;
+  --q)
+    # Log really quietly
+    superQuietLogging="true"
+    ;;
+  --rebuild)
+    # Rebuild the project before test execution
+    rebuild="true"
+    ;;
+  --no-browser)
+    # Don't launch the stats view at the end of a successful test
+    noBrowser="true"
+    ;;
+  --help|help)
+    showHelp
+    exit 0
+    ;;
+  -*)
+    errorLog "Unrecognized option '$arg' provided - see help for usage"
+    showHelp
+    exit 1;
+    ;;
+  *)
+    if [ -n "$valJustSet" ]; then
+      unset valJustSet
+    else
+      # Take the first argument that is not a matching flag as the service name, and ignore any others
+      # Explanation: "${configName:-$i}" sets configName to $i (the current argument) iff. configName has not been set
+      if [ -z "$configName" ]; then
+        configName="$arg"
+        configFile=$(find ./config -type f -name "$configName.scala")
+      else
+        errorLog "Unrecognized argument '$arg' provided - see help for usage"
+        showHelp
+        exit 1;
+      fi
+    fi
+    ;;
+esac
+shift 1
+done
+
+# Exit if no config file or victims list was provided
+if [ ! -e "$configFile" ]; then
+  errorLog "No config file could be found at '$configFile'"
+  errorLog "Exiting..."
+  exit 1
+fi
+
+# Rebuild if flagged to do so, or built distribution does not exist
+if [ -n "$rebuild" ] || [ ! -e "./target/$distributionZipFile" ]; then
+  if [ ! -e "./target/$distributionZipFile" ]; then
+    progressLog "Project build not found"
+  fi
+  progressLog "Rebuilding project..."
+  if [ -z "$quietLogging" ] && [ -z "$superQuietLogging" ]; then
+    mvn clean package -DskipTests
+  else
+    mvn clean package -q -DskipTests
+  fi
+fi
+
+# Clear and recreate tmp if exists
+if [ -d "./tmp" ]; then
+  rm -rf "./tmp"
+fi
+mkdir "./tmp"
+
+# Enter tmp, copy and deploy files
+cp ./*.log "./tmp"                    # If any requests files are in the top level, copy to ./tmp
+cp "$logFile" "./tmp" 2>/dev/null     # If requests file is provided, copy to ./tmp
+logFile=$(basename "$logFile")        # Change path to copy
+cp "$configFile" "./tmp"              # In case it's not under the project path
+configFile=$(basename "$configFile")  # Change path to copy
+cd tmp
+progressLog "Unzipping iago distribution..."
+unzip -q "../target/$distributionZipFile"  # This may need to be updated in the future
+
+# Set config file based on arguments
+function replaceProperty() {
+  nl=$'\n'
+  name=${1}
+  description=${2}
+  value=${3}
+  useQuotes=${4}
+
+  if [ -n "$value" ]; then
+    infoLog "Using $description $victims"
+    if [ -n "$useQuotes" ]; then
+      quotes='"'
+      # Escape escapes for file paths
+      value=$(echo "$value" | sed -e 's/\//\\\//g')
+    else
+      unset quotes
+    fi
+
+    if $(echo "$configContents" | grep -q -s "^ *$name *= *\""); then
+      configContents=$(echo "$configContents" | sed -e "s/^\( *$name *= *\)$quotes\(.*\)$quotes *$/\1$quotes$value$quotes/g")
+    else
+      configContents=$(echo "$configContents" | sed -e "s/^ *} *$/  $name = $quotes$value$quotes/")
+      configContents+="$nl}"
+    fi
+  fi
+}
+# Do any needed config file substitutions
+if [ -n "$configOptions" ]; then
+  progressLog "Substituting command line config arguments..."
+
+  # Read in config file contents
+  configContents=$(cat "$configFile")
+
+  # Make replacements
+  replaceProperty "victims"     "test victim"       "$victims"      "true"
+  replaceProperty "log"         "requests log file" "$logFile"      "true"
+  replaceProperty "requestRate" "request rate"      "$requestRate"
+  replaceProperty "duration"    "duration"          "$duration"
+  replaceProperty "maxRequests" "max requests"      "$maxRequests"
+
+  # Replace contents of (copy of original) config file
+  echo "$configContents" > "$configFile"
+fi
+
+infoLog "Config file in use is $configFile"
+
+# Get the host from the config for reporting kicks
+victimHost=$(cat "$configFile" | sed -n 's/^ *victims *= *\"\(.*\)\"/\1/p')
+
+# Kill a currently running test
+java -jar ${distributionJarFile} -f "$configFile" -k
+# Trap interrupts for graceful shutdown
+trap shutdownEarly SIGHUP SIGINT SIGTERM
+# Run the test
+progressLog "Running test against ${victimHost}" !
+java -jar ${distributionJarFile} -f "$configFile"
+STATUS=$?
+if [ "$STATUS" != "0" ]; then
+  javaError="true"
+fi
+testStarted="true"
+
+# Capture pid's of running Iago processes
+feederPid=$(ps -ef | grep parrot-feeder.scala | grep -v "grep" | sed -e 's/^ *[0-9]* *\([0-9]*\).*$/\1/')
+serverPid=$(ps -ef | grep parrot-server.scala | grep -v "grep" | sed -e 's/^ *[0-9]* *\([0-9]*\).*$/\1/')
+
+# Wait for both test processes to finish
+for pid in ${feederPid} ${serverPid}; do
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 0.5
+  done
+done
+
+progressLog "Done!" !
+
+# Launch Raggiana with stats
+if [ -z "$javaError" ] && [ -z "$noBrowser" ]; then
+  launchStats
+fi

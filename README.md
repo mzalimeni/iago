@@ -58,6 +58,8 @@ We support Scala 2.10 and recommend you clone the latest master: <a href="https:
 
 ### Executing Your Test
 
+You can build and launch Iago from the command line by simply running the `run` script located in the project root from bash. Run with `--help` for usage instructions.
+
 Launch Iago from the distribution with `java` `-jar` *iago_jar* `-f` *your_config*. This will create the Iago processes for you and configure it to use your transactions. To kill a running job, add `-k` to your launch parameters: `java` `-jar` *iago_jar* `-f` *your_config* `-k`.
 
 If you launch your Iago job on your local machine and an old Iago job is still running, it probably won't get far: it will attempt to re-use a port and fail. You want to kill the running job, as described above.
